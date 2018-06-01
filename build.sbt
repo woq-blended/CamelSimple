@@ -1,4 +1,6 @@
 
+val m2Repo = "file://" + System.getProperty("maven.repo.local", System.getProperty("user.home") + "/.m2/repository")
+
 val root = project.in(file("."))
   .settings(
     organization := "de.wayofquality.blended",
@@ -7,13 +9,20 @@ val root = project.in(file("."))
 
     scalaVersion := "2.11.12",
 
+    resolvers += "Local maven repo" at m2Repo,
+
     libraryDependencies := deps,
 
-    unmanagedBase := baseDirectory.value / "src" / "main" / "libs"
+    unmanagedBase := baseDirectory.value / "src" / "main" / "libs",
+
+    javaOptions in run := Seq(
+      "-Dnirvana.MaxReconnectAttempts=0",
+      "-Dnirvana.conxExceptionOnRetryFailure=true"
+    )
   )
 
 lazy val deps = Seq(
-  "de.wayofquality.blended" % "blended.jms.utils" % "2.4.0",
+  "de.wayofquality.blended" % "blended.jms.utils" % "2.5.0-M2-SNAPSHOT",
 
   "org.apache.camel" % "camel-core" % "2.17.3",
   "org.apache.camel" % "camel-core" % "2.17.3",

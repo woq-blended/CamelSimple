@@ -3,15 +3,16 @@ package blended.camelsimple
 import java.util.Date
 
 import akka.actor.ActorSystem
+import blended.jms.utils.internal.ConnectionException
 import blended.jms.utils.{BlendedJMSConnectionConfig, BlendedSingleConnectionFactory}
 import com.pcbsys.nirvana.nJMS.ConnectionFactoryImpl
 import com.pcbsys.nirvana.nSpace.NirvanaContextFactory
 import com.typesafe.config.ConfigFactory
-import javax.jms.ConnectionFactory
-import org.apache.camel.{Exchange, LoggingLevel, Processor}
-import org.apache.camel.builder.RouteBuilder
+import javax.jms.{ConnectionFactory, JMSException}
+import org.apache.camel.builder._
 import org.apache.camel.component.jms.JmsComponent
 import org.apache.camel.impl.DefaultCamelContext
+import org.apache.camel.{Exchange, LoggingLevel, Processor}
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.util.Try
@@ -52,10 +53,10 @@ class CamelSimple extends SagumMgmtTasks {
       createChannel(ChannelConfig(name = "SampleQueue", isQueue = true))
       createChannel(ChannelConfig(name = "global/sib/ping", isQueue = true))
 
-      applyACL(ChannelACLConfig(channel = "/Sample.*", user = "sib", purge=true))
-      applyACL(ChannelACLConfig(channel = "/global.*", user = "sib", purge=true))
-      connector.close()
+      //applyACL(ChannelACLConfig(channel = "/Sample.*", user = "sib", purge=true))
+      //applyACL(ChannelACLConfig(channel = "/global.*", user = "sib", purge=true))
     }
+    connector.close()
   }
 
   private val jmsConnectionConfig =
@@ -84,6 +85,32 @@ class CamelSimple extends SagumMgmtTasks {
   private val routes = new RouteBuilder {
     override def configure(): Unit = {
 
+      onException(classOf[org.springframework.jms.IllegalStateException])
+        .process(new Processor {
+          override def process(exchange: Exchange): Unit = {
+
+            def getJmsCause(current : Throwable) : Option[JMSException] = current match {
+              case jmse : JMSException => Some(jmse)
+              case o => Option(o) match {
+                case None => None
+                case Some(same) if same == same.getCause() => None
+                case Some(e) => getJmsCause(e.getCause())
+              }
+            }
+
+            Option(exchange.getProperties().get(Exchange.EXCEPTION_CAUGHT)) match {
+              case None =>
+              case Some(e) if e.isInstanceOf[org.springframework.jms.IllegalStateException] =>
+                val jmse = getJmsCause(e.asInstanceOf[org.springframework.jms.IllegalStateException]).getOrElse(
+                  new JMSException("Unknown JMS Exception")
+                )
+                system.eventStream.publish(ConnectionException("sagum", "sagum", jmse))
+              case _ =>
+              }
+            }
+          }
+      )
+
       from("scheduler://foo?delay=1000")
         .process(new Processor {
           override def process(exchange: Exchange): Unit = {
@@ -91,9 +118,10 @@ class CamelSimple extends SagumMgmtTasks {
           }
         })
         .to("sagum:/SampleQueue?deliveryMode=2")
+        .log(LoggingLevel.INFO, "Sent: ${body}")
 
-      from("sagum:/SampleQueue?cacheLevelName=CACHE_NONE")
-        .log(LoggingLevel.INFO, "${body}")
+      from("sagum:/SampleQueue?acknowledgementModeName=CLIENT_ACKNOWLEDGE&cacheLevelName=CACHE_NONE")
+        .log(LoggingLevel.INFO, "Received: ${body}")
     }
   }
 
