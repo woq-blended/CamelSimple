@@ -3,15 +3,14 @@ package blended.camelsimple
 import java.util.Date
 
 import akka.actor.ActorSystem
-import blended.jms.utils.internal.ConnectionException
-import blended.jms.utils.{BlendedJMSConnectionConfig, BlendedSingleConnectionFactory}
+import blended.jms.utils.{BlendedJMSConnectionConfig, BlendedSingleConnectionFactory, ConnectionException}
 import com.pcbsys.nirvana.nJMS.ConnectionFactoryImpl
 import com.pcbsys.nirvana.nSpace.NirvanaContextFactory
 import com.typesafe.config.ConfigFactory
-import javax.jms.{ConnectionFactory, JMSException}
+import javax.jms.{ConnectionFactory, ExceptionListener, JMSException}
 import org.apache.camel.builder._
 import org.apache.camel.component.jms.JmsComponent
-import org.apache.camel.impl.DefaultCamelContext
+import org.apache.camel.impl.{DefaultCamelContext, SimpleRegistry}
 import org.apache.camel.{Exchange, LoggingLevel, Processor}
 import org.slf4j.{Logger, LoggerFactory}
 
@@ -75,8 +74,34 @@ class CamelSimple extends SagumMgmtTasks {
 
   private val blendedCf : ConnectionFactory = new BlendedSingleConnectionFactory(jmsConnectionConfig, system, None)
 
+  private val exceptionHandler : Exception => Unit = { e =>
+
+    def getJmsCause(current : Throwable) : Option[JMSException] = current match {
+      case jmse : JMSException => Some(jmse)
+      case o => Option(o) match {
+        case None => None
+        case Some(same) if same == same.getCause() => None
+        case Some(e) => getJmsCause(e.getCause())
+      }
+    }
+
+    getJmsCause(e) match {
+      case None =>
+      case Some(illegalState) if illegalState.isInstanceOf[javax.jms.IllegalStateException] =>
+        system.eventStream.publish(ConnectionException("sagum", "sagum", illegalState))
+      case jmse =>
+    }
+
+  }
+
+  private val exceptionListener = new ExceptionListener {
+    override def onException(exception: JMSException): Unit = exceptionHandler(exception)
+  }
+
   private val camelContext = {
-    val ctxt = new DefaultCamelContext()
+    val ctxt = new DefaultCamelContext(new SimpleRegistry())
+
+    ctxt.getRegistry(classOf[SimpleRegistry]).put("el", exceptionListener)
     ctxt.addComponent("sagum", JmsComponent.jmsComponent(blendedCf))
 
     ctxt
@@ -85,31 +110,19 @@ class CamelSimple extends SagumMgmtTasks {
   private val routes = new RouteBuilder {
     override def configure(): Unit = {
 
-      onException(classOf[org.springframework.jms.IllegalStateException])
+      onException(classOf[Exception])
         .process(new Processor {
           override def process(exchange: Exchange): Unit = {
 
-            def getJmsCause(current : Throwable) : Option[JMSException] = current match {
-              case jmse : JMSException => Some(jmse)
-              case o => Option(o) match {
-                case None => None
-                case Some(same) if same == same.getCause() => None
-                case Some(e) => getJmsCause(e.getCause())
-              }
-            }
-
             Option(exchange.getProperties().get(Exchange.EXCEPTION_CAUGHT)) match {
               case None =>
-              case Some(e) if e.isInstanceOf[org.springframework.jms.IllegalStateException] =>
-                val jmse = getJmsCause(e.asInstanceOf[org.springframework.jms.IllegalStateException]).getOrElse(
-                  new JMSException("Unknown JMS Exception")
-                )
-                system.eventStream.publish(ConnectionException("sagum", "sagum", jmse))
-              case _ =>
+              case Some(e) =>
+                log.warn(s"Caught exception of type : [${e.getClass().getName()}]")
+                exceptionHandler(e.asInstanceOf[Exception])
               }
             }
           }
-      )
+      ).handled(true)
 
       from("scheduler://foo?delay=1000")
         .process(new Processor {
@@ -120,8 +133,10 @@ class CamelSimple extends SagumMgmtTasks {
         .to("sagum:/SampleQueue?deliveryMode=2")
         .log(LoggingLevel.INFO, "Sent: ${body}")
 
-      from("sagum:/SampleQueue?acknowledgementModeName=CLIENT_ACKNOWLEDGE&cacheLevelName=CACHE_NONE")
+      from("sagum:/SampleQueue?consumerType=Default&acknowledgementModeName=CLIENT_ACKNOWLEDGE&cacheLevelName=CACHE_NONE&exceptionListener=#el")
         .log(LoggingLevel.INFO, "Received: ${body}")
+
+      setErrorHandlerBuilder(new LoggingErrorHandlerBuilder())
     }
   }
 
