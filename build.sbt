@@ -22,7 +22,7 @@ val root = project.in(file("."))
   )
 
 lazy val deps = Seq(
-  "de.wayofquality.blended" % "blended.jms.utils" % "2.5.0-M3"
+  "de.wayofquality.blended" % "blended.jms.utils" % "2.5.0-M3",
 
   "org.apache.camel" % "camel-core" % "2.17.3",
   "org.apache.camel" % "camel-core" % "2.17.3",
