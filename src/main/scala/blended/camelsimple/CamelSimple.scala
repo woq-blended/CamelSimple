@@ -3,9 +3,7 @@ package blended.camelsimple
 import java.util.Date
 
 import akka.actor.ActorSystem
-import blended.jms.utils.{BlendedJMSConnectionConfig, BlendedSingleConnectionFactory, ConnectionException}
-import com.pcbsys.nirvana.nJMS.ConnectionFactoryImpl
-import com.pcbsys.nirvana.nSpace.NirvanaContextFactory
+import blended.jms.utils.{BlendedSingleConnectionFactory, ConnectionException}
 import com.typesafe.config.ConfigFactory
 import javax.jms.{ConnectionFactory, ExceptionListener, JMSException}
 import org.apache.camel.builder._
@@ -14,8 +12,6 @@ import org.apache.camel.impl.{DefaultCamelContext, SimpleRegistry}
 import org.apache.camel.{Exchange, LoggingLevel, Processor}
 import org.slf4j.{Logger, LoggerFactory}
 
-import scala.util.Try
-
 object CamelSimple {
 
   def main(args: Array[String]) : Unit = {
@@ -23,56 +19,40 @@ object CamelSimple {
   }
 }
 
-class CamelSimple extends SagumMgmtTasks {
+class CamelSimple extends SagumSupport with SagumMgmtTasks {
 
   override val log : Logger  = LoggerFactory.getLogger(classOf[CamelSimple])
   private val config = ConfigFactory.defaultApplication().resolve()
   private val system = ActorSystem("CamelSimple")
 
-  private implicit val connector : SagDomainConnector = SagDomainConnector(config.getConfig("sagConnector"))
-
-  private val jndiName = config.getString("jndiName")
-
-  private val sagumCf = {
-    val cf = new ConnectionFactoryImpl(config.getString("brokerUrl"))
-    cf.setEnableSharedDurable(true)
-    cf.setMaxReconAttempts(0)
-    cf.setConxExceptionOnFailure(true)
-    cf.setAutoCreateResource(false)
-    cf.setImmediateReconnect(false)
-    cf.setFollowMaster(true)
-    cf
-  }
-
   // This is just a helper method to initialize a naked SAGUM messaging broker
   private def setup() : Unit = {
     if (config.getBoolean("setup")) {
-      bindObject(sagumCf, jndiName)
+
+      implicit val connector : SagDomainConnector = SagDomainConnector(config.getConfig("sagConnector"))
+
+      val jndiName = config.getString("jndiName")
+
+      val cf = sagCf(config.getString("brokerUrl"))
+
+      bindObject(cf, jndiName)(connector)
 
       createChannel(ChannelConfig(name = "SampleQueue", isQueue = true))
       createChannel(ChannelConfig(name = "global/sib/ping", isQueue = true))
 
-      //applyACL(ChannelACLConfig(channel = "/Sample.*", user = "sib", purge=true))
-      //applyACL(ChannelACLConfig(channel = "/global.*", user = "sib", purge=true))
+      connector.close()
     }
-    connector.close()
   }
-
-  private val jmsConnectionConfig =
-    BlendedJMSConnectionConfig.fromConfig(s => Try(s))(
-      "sagum", "sagum",
-      config.getConfig("sagumCF")
-    ).copy(
-      cfEnabled = { Option(_ => true) },
-      cfClassName = Option(classOf[ConnectionFactoryImpl].getName()),
-      ctxtClassName = Option(classOf[NirvanaContextFactory].getName())
-    )
 
   // This is a connection factory that is actually used in the SIB application.
   // Only one connection will be created and maintained from this connection factory wrapper.
   // Under the covers we send a ping every so often to make sure the connection is still operational.
 
-  private val blendedCf : ConnectionFactory = new BlendedSingleConnectionFactory(jmsConnectionConfig, system, None)
+  private val blendedCf : ConnectionFactory = new BlendedSingleConnectionFactory(
+    jmsConnectionConfig(config.getConfig("sagumCF")),
+    system,
+    None
+  )
 
   private val exceptionHandler : Exception => Unit = { e =>
 
