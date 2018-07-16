@@ -1,12 +1,21 @@
 import org.sonatype.maven.polyglot.scala.model._
 import scala.collection.immutable.Seq
   
+val sagumVersion = "9.9"  
+val sagumLibdir = "src/main/libs" + sagumVersion
+
 object Versions {
+  val akka = "2.5.9"	
+  val blended = "2.5.0-M8"	
+  val camel = "2.17.3"	
   val scalaVersion = "2.12.6"
 } 
 
+implicit val scalaVersion = ScalaVersion(Versions.scalaVersion)
+
 object Plugins {
   val scala = "net.alchim31.maven" % "scala-maven-plugin" % "3.3.2"
+  val install = "org.apache.maven.plugins" % "maven-install-plugin" % "2.5.2"
 } 
 
 val prjProperties : Map[String, String] = Map( 
@@ -63,6 +72,7 @@ val scalaMavenPlugin = Plugin(
   configuration = scalaCompilerConfig
 )
 
+
 val prjResources = Seq(
   Resource(
     filtering = true,
@@ -82,15 +92,57 @@ val prjTestResources = Seq(
     directory = "src/test/binaryResources"
   )
 )
+
+def installSagLib(lib: String) : Execution = Execution(
+  id = "install-" + lib,
+  goals = Seq("install-file"),
+  phase = "initialize",
+  configuration = Config(
+    file = "${project.basedir}/" + sagumLibdir + "/" + lib + ".jar",
+    artifactId = lib, 
+    groupId = "com.sagum",
+    version = sagumVersion,
+    packaging = "jar"
+  )
+)
 	
 Model(
   gav = "de.wayofquality.blended" % "CamelSimple" % "0.0.1-SNAPSHOT",
   properties = prjProperties,
+  dependencies = Seq(
+  	"de.wayofquality.blended" % "blended.jms.utils" % Versions.blended,
+  	"org.apache.camel" % "camel-core" % Versions.camel,
+  	"org.apache.camel" % "camel-jms" % Versions.camel,
+
+  	"com.typesafe.akka" %% "akka-actor" % Versions.akka,
+    "com.typesafe.akka" %% "akka-stream" % Versions.akka,
+    "com.typesafe.akka" %% "akka-slf4j" % Versions.akka,
+
+    "com.sagum" % "nAdminAPI" % sagumVersion % "provided", 
+    "com.sagum" % "nClient" % sagumVersion % "provided", 
+    "com.sagum" % "nJMS" % sagumVersion % "provided", 
+    
+    "org.slf4j" % "slf4j-api" % "1.7.25",
+    "ch.qos.logback" % "logback-core" % "1.2.3",
+    "ch.qos.logback" % "logback-classic" % "1.2.3",
+
+    "com.typesafe.akka" %% "akka-testkit" % Versions.akka % "test",
+    "org.scalatest" %% "scalatest" % "3.0.5" % "test"
+  ),
+
   build = Build(
   	resources = prjResources, 
   	testResources = prjTestResources,
-	plugins = Seq(
-	  scalaMavenPlugin
-	)
+	  plugins = Seq(
+	    scalaMavenPlugin,
+      Plugin(
+        gav = Plugins.install,
+        executions = Seq(
+          installSagLib("nAdminAPI"),
+          installSagLib("nClient"),
+          installSagLib("nJMS")
+        )
+      )
+	  )
   )
 )
