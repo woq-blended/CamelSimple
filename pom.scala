@@ -16,6 +16,7 @@ implicit val scalaVersion = ScalaVersion(Versions.scalaVersion)
 object Plugins {
   val scala = "net.alchim31.maven" % "scala-maven-plugin" % "3.3.2"
   val install = "org.apache.maven.plugins" % "maven-install-plugin" % "2.5.2"
+  val exec = "org.codehaus.mojo" % "exec-maven-plugin" % "1.5.0"
 } 
 
 val prjProperties : Map[String, String] = Map( 
@@ -118,9 +119,9 @@ Model(
     "com.typesafe.akka" %% "akka-stream" % Versions.akka,
     "com.typesafe.akka" %% "akka-slf4j" % Versions.akka,
 
-    "com.sagum" % "nAdminAPI" % sagumVersion % "provided", 
-    "com.sagum" % "nClient" % sagumVersion % "provided", 
-    "com.sagum" % "nJMS" % sagumVersion % "provided", 
+    "com.sagum" % "nAdminAPI" % sagumVersion, 
+    "com.sagum" % "nClient" % sagumVersion, 
+    "com.sagum" % "nJMS" % sagumVersion, 
     
     "org.slf4j" % "slf4j-api" % "1.7.25",
     "ch.qos.logback" % "logback-core" % "1.2.3",
@@ -141,6 +142,20 @@ Model(
           installSagLib("nAdminAPI"),
           installSagLib("nClient"),
           installSagLib("nJMS")
+        )
+      ),
+      Plugin(
+        gav = Plugins.exec,
+        executions = Seq(
+          // To run CamelSimple, exec: mvn exec:java@CamelSimple
+          Execution(
+            id = "CamelSimple",
+            goals = Seq("java"),
+            phase = "none",
+            configuration = Config(
+              mainClass = "blended.camelsimple.CamelSimple"
+            )
+          )
         )
       )
 	  )
