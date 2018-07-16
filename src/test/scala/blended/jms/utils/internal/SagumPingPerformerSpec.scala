@@ -24,7 +24,7 @@ class SagumPingPerformerSpec extends JMSPingPerformerSpec
   private[this] val config = system.settings.config
   override val cfg = jmsConnectionConfig(config.getConfig("sagumCF"))
 
-  override val bulkCount: Int = 10000
+  override val bulkCount: Int = 1000
 
   override val bulkTimeout: FiniteDuration = 1.hour
 
@@ -38,7 +38,7 @@ class SagumPingPerformerSpec extends JMSPingPerformerSpec
 
       val cf = sagCf(config.getString("brokerUrl"))
 
-      bindObject(cf, jndiName)(connector)
+      assert(bindObject(cf, jndiName)(connector).get == jndiName)
 
       createChannel(ChannelConfig(name = pingTopic, isQueue = false))
       createChannel(ChannelConfig(name = pingQueue, isQueue = true))

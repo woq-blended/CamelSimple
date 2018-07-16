@@ -27,6 +27,7 @@ trait SagumSupport { this : SagumMgmtTasks =>
     cf.setAutoCreateResource(false)
     cf.setImmediateReconnect(false)
     cf.setFollowMaster(true)
+    cf.setEnableMultiplexedConnections(true)
     cf
   }
 
